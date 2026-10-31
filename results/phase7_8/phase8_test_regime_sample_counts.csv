@@ -1,0 +1,7 @@
+adx_threshold,regime,n_days,proportion(%),sufficient_sample(N>=30)
+20.0,Strong_Trend,332,66.27,True
+20.0,Weak_Trend,169,33.73,True
+25.0,Strong_Trend,216,43.11,True
+25.0,Weak_Trend,285,56.89,True
+30.0,Strong_Trend,128,25.55,True
+30.0,Weak_Trend,373,74.45,True

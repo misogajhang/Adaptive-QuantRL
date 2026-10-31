@@ -1,0 +1,105 @@
+{
+  "checkpoint_id": "sac_B_55",
+  "track": "Track_2_Reward_Ablation",
+  "algorithm": "sac",
+  "reward_type": "B",
+  "seed": 55,
+  "lambda_d": 0.02,
+  "lambda_v": 0.0,
+  "configured_lambda_d": 0.02,
+  "configured_lambda_v": 10.0,
+  "total_timesteps": 10080,
+  "train_episode_length": 252,
+  "one_way_cost_rate": 0.001,
+  "observation_shape": [
+    483
+  ],
+  "action_shape": [
+    1
+  ],
+  "hyperparameters": {
+    "learning_rate": 0.0003,
+    "buffer_size": 50000,
+    "learning_starts": 252,
+    "batch_size": 64,
+    "tau": 0.005,
+    "gamma": 0.99,
+    "train_freq": 1,
+    "gradient_steps": 1,
+    "ent_coef": "auto",
+    "policy_kwargs": {
+      "net_arch": [
+        128,
+        128
+      ],
+      "use_sde": false
+    }
+  },
+  "scaler_stats": {
+    "train_start": "2010-01-04",
+    "train_end": "2019-12-31",
+    "feature_columns": [
+      "ret_1d",
+      "log_ret_1d",
+      "ret_5d",
+      "ret_20d",
+      "close_to_sma20",
+      "close_to_sma50",
+      "close_to_sma200",
+      "vol_20d",
+      "rsi_14",
+      "macd_norm",
+      "macd_signal_norm",
+      "macd_hist_norm",
+      "atr_14_norm",
+      "adx_14_scaled",
+      "plus_di_14",
+      "minus_di_14"
+    ],
+    "market_scaler_mean": {
+      "ret_1d": 0.0004649099543242393,
+      "log_ret_1d": 0.00042155416196309916,
+      "ret_5d": 0.0022903729302252685,
+      "ret_20d": 0.00899193988373884,
+      "close_to_sma20": 0.0040670282544757776,
+      "close_to_sma50": 0.01041210591721729,
+      "close_to_sma200": 0.04311949284001448,
+      "vol_20d": 0.008326874636899666,
+      "rsi_14": 55.68561148876394,
+      "macd_norm": 0.0027005700498404952,
+      "macd_signal_norm": 0.002703784178289044,
+      "macd_hist_norm": -3.2141284485487504e-06,
+      "atr_14_norm": 0.011284290588313699,
+      "adx_14_scaled": 21.775002552275268,
+      "plus_di_14": 25.175903882692594,
+      "minus_di_14": 23.893517975847292
+    },
+    "market_scaler_std": {
+      "ret_1d": 0.00929125828569662,
+      "log_ret_1d": 0.009307361768318756,
+      "ret_5d": 0.019699919177022206,
+      "ret_20d": 0.03492785190678049,
+      "close_to_sma20": 0.020024132634462632,
+      "close_to_sma50": 0.029256330506666345,
+      "close_to_sma200": 0.04666458681062769,
+      "vol_20d": 0.0042957246404201465,
+      "rsi_14": 11.205296691249968,
+      "macd_norm": 0.008344146574002915,
+      "macd_signal_norm": 0.007668888746436615,
+      "macd_hist_norm": 0.002862199696220546,
+      "atr_14_norm": 0.004846330677990589,
+      "adx_14_scaled": 7.521161866393291,
+      "plus_di_14": 6.945964168459029,
+      "minus_di_14": 7.227363379540003
+    },
+    "obs_log_variance_norm": {
+      "eps": 1e-08,
+      "window": 30,
+      "mean": -9.739689433169513,
+      "std": 0.8603311116462635,
+      "initial_obs_value": 0.0
+    }
+  },
+  "model_path": "/Users/ihansu/Desktop/Hansu/강화학습 이용한 주식모형/models/checkpoints/sac_B_55/model.zip",
+  "training_time_sec": 24.826
+}

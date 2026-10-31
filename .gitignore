@@ -1,0 +1,39 @@
+# 가상환경 (Virtual Environments)
+.venv/
+env/
+venv/
+
+# 파이썬 및 테스트 캐시 (Python & Test Cache)
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS 및 시스템 임시 파일 (OS & System Temporary Files)
+.DS_Store
+*.textClipping
+*.swp
+초안.md
+초안*
+초안*
+
+# 데이터 폴더 제외 (Exclude Data Directory)
+data/
+
+# LaTeX 빌드 임시 파일 (LaTeX Build Temporary Files)
+paper/*.aux
+paper/*.log
+paper/*.out
+!paper/*.tex
+!paper/*.pdf
+!paper/report_kr.md
+
+# 대용량 가중치 제외 (Large Model Checkpoints)
+models/checkpoints/*.zip
+models/checkpoints/**/*.zip
+
+# 결과 보고서 안전 포함 (Force Include Results Reports)
+!results/
+!results/**/
+!results/**/*.csv
+!results/**/*.json
+!results/**/*.md

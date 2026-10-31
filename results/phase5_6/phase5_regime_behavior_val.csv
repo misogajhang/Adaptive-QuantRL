@@ -1,0 +1,10 @@
+adx_threshold,regime,n_days_per_seed,ppo_mean_weight(%),sac_mean_weight(%),weight_diff_ppo_minus_sac(%),ppo_sac_action_corr
+20.0,Strong_Trend,446,35.73,55.61,-19.88,0.054
+20.0,Weak_Trend,309,34.79,53.29,-18.51,0.0771
+20.0,All,755,35.34,54.66,-19.32,0.0491
+25.0,Strong_Trend,264,33.98,55.13,-21.15,0.0426
+25.0,Weak_Trend,491,36.07,54.41,-18.34,0.0634
+25.0,All,755,35.34,54.66,-19.32,0.0491
+30.0,Strong_Trend,122,33.27,55.88,-22.61,0.0128
+30.0,Weak_Trend,633,35.74,54.43,-18.69,0.0639
+30.0,All,755,35.34,54.66,-19.32,0.0491

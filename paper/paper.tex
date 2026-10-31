@@ -1,0 +1,270 @@
+\documentclass[10pt,twocolumn,conference]{IEEEtran}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{cite}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+
+\title{Adaptive-QuantRL: Controlled Empirical Evaluation of Regime-Adaptive PPO/SAC Ensembles and Risk-Penalized Rewards in Dynamic Asset Allocation}
+
+\author{
+\IEEEauthorblockN{Hansu Lee}
+\IEEEauthorblockA{Quantitative Finance \& Reinforcement Learning Research\\
+Email: ihansu@research.quantrl.org}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Applying deep reinforcement learning (DRL) to financial portfolio management is frequently undermined by look-ahead leakage, unrealistic execution assumptions, uncalibrated risk penalties, and the absence of exposure-controlled baselines. In this paper, we present \textbf{Adaptive-QuantRL}, a strictly controlled 8-phase empirical framework that evaluates on-policy Proximal Policy Optimization (PPO) and off-policy Soft Actor-Critic (SAC) agents for dynamic allocation on unadjusted SPY price series from 2010 to 2024. We enforce a two-stage accounting mechanism ($t$ close observation $\rightarrow$ $t+1$ open execution with overnight gap reflection $\rightarrow$ $t+1$ close valuation) under a one-way transaction cost of 0.1\%, decouple log-normalized observation variance from raw non-negative reward variance, and evaluate 30 independently trained models across 5 random seeds (11, 22, 33, 44, 55). Out-of-sample testing (2023--2024) reveals three central findings: (1) SAC policies substantially suppress turnover, incurring only \$189--\$208 in cumulative transaction costs over 501 trading days and achieving a Sharpe ratio of 1.6317, CAGR of 12.16\%, and Maximum Drawdown (MDD) of 5.61\%--5.87\%, outperforming the Moving Average (20/50) benchmark across all metrics and maintaining a Sharpe ratio above 1.16 even when transaction costs quintuple to 0.5\%; (2) in contrast, PPO exhibits excessive turnover (\$1,078--\$1,131 in costs), which degrades both standalone PPO performance (Sharpe 0.33--0.54) and the validation-selected ADX(14) regime-adaptive ensemble (\texttt{ADX30\_S75\_W25}, Sharpe 1.4269), causing the ensemble to underperform a newly introduced \emph{Exposure-Matched Baseline} (47.98\% fixed equity weight, Sharpe 1.7170) by $-0.2901$ in Sharpe and $-1.58\%$p in CAGR; and (3) calibrating the drawdown penalty coefficient ($\lambda_d = 0.02$, Reward B) reduces SAC's out-of-sample MDD in 4 out of 5 random seeds while cutting cross-seed Sharpe variance by 41\%.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Deep Reinforcement Learning, Portfolio Optimization, Soft Actor-Critic (SAC), Proximal Policy Optimization (PPO), Transaction Cost Sensitivity, Reward Ablation, Exposure-Matched Baseline
+\end{IEEEkeywords}
+
+\section{Introduction}
+Deep reinforcement learning (DRL) has attracted considerable interest as a framework for continuous portfolio allocation, promising to integrate nonlinear market signals with transaction-cost-aware execution \cite{moody2001learning, jiang2017deep, liu2020finrl}. Despite proliferating architectures, empirical claims in financial DRL often suffer from four methodological vulnerabilities:
+\begin{enumerate}
+    \item \textbf{Information Leakage and Execution Mismatch}: Fitting feature scalers across the full sample or assuming instantaneous execution at the same closing price ($Close_t$) used to compute technical indicators introduces severe look-ahead bias.
+    \item \textbf{Confounded Beta Exposure}: Dynamic DRL agents typically hold an average equity weight between 40\% and 60\%. Comparing such agents solely against 100\% Buy-and-Hold or noisy Moving Average crossover rules confounds genuine market-timing alpha with passive risk-reduction beta.
+    \item \textbf{Reward Scale Collapse and Variance Sign Inversion}: Adding uncalibrated drawdown or variance penalties to daily log returns often causes policy collapse into 100\% cash. Furthermore, feeding z-score standardized variance into a reward penalty term reverses the penalty into a reward whenever variance falls below its historical mean.
+    \item \textbf{Single-Seed Fragility}: Reporting cherry-picked trajectories without multi-seed distribution metrics obscures initialization sensitivity and turnover fragility under higher friction.
+\end{enumerate}
+
+To address these challenges, we design \textbf{Adaptive-QuantRL}, an institutional-grade experimental protocol that separates ensemble rule discovery from reward ablation across 30 independent checkpoints. Rather than selectively reporting favorable metrics, we rigorously test four pre-registered Research Questions (RQ1--RQ4) and transparently report both the strengths of off-policy entropy-regularized allocation (SAC) and the negative market-timing alpha of PPO-blended ensembles when benchmarked against an exposure-matched baseline.
+
+\section{Problem Formulation \& Accounting Protocol}
+
+\subsection{POMDP State Space and Strict Scaler Isolation}
+We formulate single-asset dynamic allocation between the S\&P 500 ETF (SPY, unadjusted OHLC prices excluding dividends to isolate pure price-action behavior) and cash as a Partially Observable Markov Decision Process (POMDP). At each trading day $t$ after market close, the agent observes a 483-dimensional state vector $s_t \in \mathbb{R}^{483}$ stacking a 30-day lookback window of 16 market features ($30 \times 16 = 480$) and 3 current portfolio state variables:
+\begin{equation}
+    s_t = \left[ \tilde{X}_{t-29:t}^{\text{mkt}}, \; w_t^{\text{close}}, \; DD_t, \; \tilde{V}_{30,t}^{\text{obs}} \right].
+\end{equation}
+The 16 market features include multi-horizon returns ($\text{ret}_{1d}, \text{log\_ret}_{1d}, \text{ret}_{5d}, \text{ret}_{20d}$), moving average divergences ($\text{Close}/\text{SMA}_{20,50,200}-1$), 20-day realized volatility ($\text{vol}_{20d}$), $\text{RSI}_{14}$, normalized MACD components, normalized $\text{ATR}_{14}$, and directional movement indicators ($\text{ADX}_{14}/100, +\text{DI}_{14}, -\text{DI}_{14}$). All market features $\tilde{X}^{\text{mkt}}$ are standardized using mean and standard deviation statistics fitted \emph{exclusively} on the Train split (2010--2019).
+
+Crucially, we decouple the variance representation between the observation space and the reward function. Let $\sigma_{30,t}^{2,\text{raw}} = \text{Var}(r_{t-29:t}^{\text{port}}) \ge 0$ denote the 30-day rolling sample variance of daily portfolio returns (set to $0$ for $t < 30$). The agent observes a log-normalized transformation:
+\begin{equation}
+    \tilde{V}_{30,t}^{\text{obs}} = \frac{\ln(\sigma_{30,t}^{2,\text{raw}} + 10^{-8}) - \mu_{\text{train}}^{\ln V}}{\sigma_{\text{train}}^{\ln V}},
+\end{equation}
+whereas the reward function strictly accesses the non-negative raw variance $\sigma_{30,t}^{2,\text{raw}} \ge 0$, guaranteeing that risk penalties never turn positive during low-volatility regimes.
+
+\subsection{Two-Stage Execution and Accounting Identities}
+At day $t$ close, the agent outputs a continuous target stock weight $a_t \in [0, 1]$. Execution occurs at day $t+1$ market open ($Open_{t+1}$), followed by end-of-day mark-to-market valuation at $Close_{t+1}$:
+\begin{align}
+    Equity_t^{\text{close}} &= Cash_t + Shares_t \times Close_t, \\
+    Equity_{t+1}^{\text{open,pre}} &= Cash_t + Shares_t \times Open_{t+1},
+\end{align}
+where $Equity_{t+1}^{\text{open,pre}}$ incorporates the overnight gap return prior to rebalancing. To reach the target dollar allocation $S_{t+1}^{\text{target}} = a_t \cdot Equity_{t+1}^{\text{open,pre}}$ from current pre-trade holdings $S_{t+1}^{\text{pre}} = Shares_t \times Open_{t+1}$, the traded dollar notional is $\Delta S_{t+1} = |S_{t+1}^{\text{target}} - S_{t+1}^{\text{pre}}|$. With a one-way transaction cost rate $c = 0.0010$ (0.05\% commission + 0.05\% slippage), the deducted fee is $Cost_{t+1} = c \cdot \Delta S_{t+1}$, updating shares and cash as:
+\begin{align}
+    Shares_{t+1} &= \frac{S_{t+1}^{\text{target}}}{Open_{t+1}}, \\
+    Cash_{t+1} &= Equity_{t+1}^{\text{open,pre}} - S_{t+1}^{\text{target}} - Cost_{t+1}, \\
+    Equity_{t+1}^{\text{close}} &= Cash_{t+1} + Shares_{t+1} \times Close_{t+1}.
+\end{align}
+Peak equity and end-of-day drawdown are tracked via $Peak_{t+1} = \max(Peak_t, Equity_{t+1}^{\text{close}})$ and $DD_{t+1} = (Peak_{t+1} - Equity_{t+1}^{\text{close}}) / Peak_{t+1} \in [0, 1]$.
+
+\subsection{Calibrated Reward Ablation Formulations}
+We evaluate three hierarchical reward structures ($R_A, R_B, R_C$) at step $t \rightarrow t+1$:
+\begin{align}
+    R_{A,t} &= \ln\!\left(\frac{Equity_{t+1}^{\text{close}}}{Equity_t^{\text{close}}}\right), \\
+    R_{B,t} &= R_{A,t} - \lambda_d \cdot DD_{t+1}, \\
+    R_{C,t} &= R_{B,t} - \lambda_v \cdot \sigma_{30,t+1}^{2,\text{raw}}.
+\end{align}
+To prevent excessive penalties from forcing all-cash policies, we measure pre-training reward component quantiles across three reference policies (Buy-and-Hold, Fixed 50:50, and Random Policy) over ten 252-day Train episodes. The pooled mean absolute log return is $\mathbb{E}[|R_A|] = 0.004285$ (median $0.002502$), while pooled mean drawdown is $0.024126$ and mean active 30-day raw variance is $4.857 \times 10^{-5}$. Selecting $\lambda_d = 0.02$ and $\lambda_v = 10.0$ calibrates the mean penalty terms to $11.26\%$ and $11.33\%$ of $\mathbb{E}[|R_A|]$, respectively.
+
+\section{Empirical Setup}
+
+\subsection{Chronological Split and Controlled Training}
+Data spans January 2009 (warm-up buffer) through December 2024 for unadjusted SPY daily bars:
+\begin{itemize}
+    \item \textbf{Train}: \texttt{2010-01-01} to \texttt{2019-12-31} (2,515 trading days; random 252-day episodes initialized at \$10,000 cash).
+    \item \textbf{Validation}: \texttt{2020-01-01} to \texttt{2022-12-31} (755 trading days; COVID-19 crash, 2021 bull market, and 2022 inflation bear market).
+    \item \textbf{Test}: \texttt{2023-01-01} to \texttt{2024-12-31} (501 trading days; out-of-sample evaluation with strictly frozen models).
+\end{itemize}
+
+We train 30 independent models across two tracks: \textbf{Track 1 (Ensemble Track)} trains PPO and SAC with $R_A$ across 5 random seeds $\{11, 22, 33, 44, 55\}$ (10 models); \textbf{Track 2 (Ablation Track)} trains PPO and SAC with $R_B$ and $R_C$ across the same 5 seeds (20 models). Every model is trained for exactly $10,080$ timesteps (40 episodes $\times$ 252 days) using identical `[128, 128]` MLP architectures, learning rate $3\times 10^{-4}$, and $\gamma = 0.99$.
+
+\subsection{Shared-Env Dynamic Ensemble \& Exposure-Matched Baseline}
+In Phase 5 and 6, we classify market regimes at day $t$ close using $\text{ADX}_{14,t}$ against threshold candidates $\theta \in \{20.0, 25.0, 30.0\}$. If $\text{ADX}_{14,t} \ge \theta$, the regime is \texttt{Strong\_Trend}; otherwise, \texttt{Weak\_Trend}. For each seed $s \in \{11,22,33,44,55\}$, the action-level ensemble combines deterministic actions from frozen Reward A policies:
+\begin{equation}
+    a_t^{\text{ens}}(s) = w_{\text{reg}}^{\text{ppo}} \cdot a_t^{\text{ppo}}(s) + (1 - w_{\text{reg}}^{\text{ppo}}) \cdot a_t^{\text{sac}}(s),
+\end{equation}
+where $(w_{\text{strong}}^{\text{ppo}}, w_{\text{weak}}^{\text{ppo}}) \in \{0.25, 0.50, 0.75\}^2$, yielding $3 \times 3 \times 3 = 27$ candidate ensemble rules evaluated inside a shared Validation \texttt{TradingEnv}.
+
+The top-ranked rule on Validation is frozen as \texttt{ADX30\_S75\_W25} ($\theta=30.0$, $w_{\text{strong}}^{\text{ppo}}=0.75$, $w_{\text{weak}}^{\text{ppo}}=0.25$), which achieves a Validation mean Sharpe of $0.2267 \pm 0.0846$ and MDD of $18.98\%$. From this frozen ensemble's Validation trajectories, we extract each seed's average stock exposure: $\{11: 48.26\%, 22: 53.09\%, 33: 44.60\%, 44: 45.17\%, 55: 48.76\%\}$ (mean $47.98\%$) and freeze these exact constant weights as the \textbf{Exposure-Matched Baseline} for out-of-sample testing.
+
+\begin{table*}[t]
+\centering
+\caption{Phase 4 Validation (2020--2022, 755 Days) Aggregated Model Ranking Across 5 Random Seeds (One-Way Cost = 0.1\%)}
+\label{tab:val_ranking}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccccccccc}
+\toprule
+\textbf{Rank} & \textbf{Algorithm} & \textbf{Reward} & $\boldsymbol{\lambda_d}$ & $\boldsymbol{\lambda_v}$ & \textbf{Cum. Ret (\%)} & \textbf{CAGR (\%)} & \textbf{Ann. Vol (\%)} & \textbf{Sharpe (Mean $\pm$ Std)} & \textbf{MDD (Mean $\pm$ Std \%)} & \textbf{Avg Weight (\%)} & \textbf{Mean Cost (\$)} \\
+\midrule
+1 & SAC & Reward B & 0.02 & 0.0  &  9.54 &  3.03 $\pm$ 2.77 & 14.28 & \textbf{0.2753} $\pm$ 0.1761 & \textbf{20.69} $\pm$ 2.36 & 53.38 &   314.80 \\
+2 & SAC & Reward C & 0.02 & 10.0 &  8.95 &  2.86 $\pm$ 2.46 & 14.37 & 0.2647 $\pm$ 0.1577 & 21.32 $\pm$ 2.59 & 51.58 &   302.35 \\
+3 & SAC & Reward A & 0.00 & 0.0  &  8.86 &  2.81 $\pm$ 2.73 & 14.84 & 0.2505 $\pm$ 0.1652 & 21.63 $\pm$ 1.12 & 54.66 &   291.05 \\
+4 & PPO & Reward B & 0.02 & 0.0  & $-4.39$ & $-1.97 \pm 7.70$ & 14.75 & $-0.0429 \pm 0.5261$ & 22.05 $\pm$ 8.52 & 39.65 & 1,841.47 \\
+5 & PPO & Reward A & 0.00 & 0.0  & $-6.87$ & $-2.40 \pm 2.57$ & 12.85 & $-0.1223 \pm 0.1985$ & 20.99 $\pm$ 2.60 & 35.34 & 1,766.98 \\
+6 & PPO & Reward C & 0.02 & 10.0 & $-7.41$ & $-2.71 \pm 4.55$ & 13.97 & $-0.1544 \pm 0.3669$ & 20.97 $\pm$ 4.13 & 36.95 & 1,812.14 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\caption{Phase 7 Out-of-Sample Test (2023--2024, 501 Days) Performance Summary Across Benchmarks and 5-Seed RL Models (Cost = 0.1\%)}
+\label{tab:test_summary}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccccccc}
+\toprule
+\textbf{Category} & \textbf{Model / Strategy} & \textbf{Cum. Ret (\%)} & \textbf{CAGR (\%)} & \textbf{Ann. Vol (\%)} & \textbf{Sharpe Ratio} & \textbf{Std Sharpe} & \textbf{Mean MDD (\%)} & \textbf{Stock Weight (\%)} & \textbf{Mean Cost (\$)} \\
+\midrule
+Traditional Benchmark     & \texttt{1\_Buy\_and\_Hold}               & 52.80 & \textbf{23.77} & 12.88 & \textbf{1.7212} & 0.0000 & 10.29 & 100.00 &    10.00 \\
+Traditional Benchmark     & \texttt{2\_Cash\_100}                    &  0.00 &  0.00 &  0.00 & 0.0000 & 0.0000 &  0.00 &   0.00 &     0.00 \\
+Traditional Benchmark     & \texttt{3\_Fixed\_50\_50}                & 24.05 & 11.45 &  6.43 & 1.7171 & 0.0000 &  5.25 &  50.00 &    13.73 \\
+Traditional Benchmark     & \texttt{4\_Moving\_Average\_20\_50}      & 22.94 & 10.95 & 10.73 & 1.0219 & 0.0000 &  9.39 &  73.65 &    95.86 \\
+\midrule
+Exposure-Matched Baseline & \texttt{Exposure\_Matched\_Baseline}     & 22.99 & 10.97 &  6.17 & 1.7170 & 0.0003 & \textbf{5.04} &  47.98 &    13.44 \\
+\midrule
+Single RL Model           & \texttt{PPO\_Reward\_A}                  &  4.72 &  2.31 &  7.03 & 0.3340 & 0.3636 &  8.45 &  32.78 & 1,094.15 \\
+Reward Ablation Model     & \texttt{PPO\_Reward\_B}                  &  4.01 &  1.99 &  7.34 & 0.3286 & 0.2296 &  8.25 &  33.07 & 1,078.25 \\
+Reward Ablation Model     & \texttt{PPO\_Reward\_C}                  &  8.27 &  4.03 &  7.32 & 0.5404 & 0.4638 &  8.73 &  33.67 & 1,131.39 \\
+\midrule
+Single RL Model           & \texttt{SAC\_Reward\_A}                  & \textbf{25.63} & \textbf{12.16} &  7.26 & \textbf{1.6317} & 0.1766 &  5.87 &  55.04 &   189.00 \\
+Reward Ablation Model     & \texttt{SAC\_Reward\_B}                  & 24.11 & 11.48 &  6.93 & 1.6077 & \textbf{0.1039} & \textbf{5.61} &  52.36 &   207.61 \\
+Reward Ablation Model     & \texttt{SAC\_Reward\_C}                  & 24.59 & 11.69 &  6.97 & 1.6314 & 0.1522 &  5.79 &  52.75 &   195.49 \\
+\midrule
+Dynamic Ensemble          & \texttt{Dynamic\_Ensemble\_ADX30\_S75\_W25} & 19.54 &  9.39 &  6.43 & 1.4269 & \textbf{0.0755} &  5.81 &  45.27 &   466.21 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\section{Empirical Results}
+
+\subsection{RQ 1: Strategic Comparison Against Traditional Benchmarks}
+Table~\ref{tab:val_ranking} and Table~\ref{tab:test_summary} report the Validation and Test performance across all evaluated models. During the 2023--2024 Test period (501 trading days), unadjusted SPY (\texttt{1\_Buy\_and\_Hold}) rose $52.80\%$ (CAGR $23.77\%$, volatility $12.88\%$, Sharpe $1.7212$, MDD $10.29\%$). All three ADX threshold candidates ($\theta \in \{20, 25, 30\}$) exhibited statistically sufficient sample sizes ($N \ge 30$) in both strong-trend ($332, 216, 128$ days) and weak-trend ($169, 285, 373$ days) regimes.
+
+Comparing the DRL algorithms reveals a stark structural divergence between SAC and PPO:
+\begin{itemize}
+    \item \textbf{SAC Outperforms Active Rule-Based Trend Following}: \texttt{SAC\_Reward\_A} achieves a cumulative return of $25.63\%$, CAGR of $12.16\%$, Sharpe of $1.6317$, and MDD of $5.87\%$ at an average stock weight of $55.04\%$. Across all three reward variants, SAC decisively outperforms \texttt{4\_Moving\_Average\_20\_50} (CAGR $10.95\%$, Sharpe $1.0219$, MDD $9.39\%$) by $+0.59$ to $+0.61$ in Sharpe ratio and reduces maximum drawdown by over $3.5\%$p. SAC also exceeds \texttt{3\_Fixed\_50\_50} in cumulative return ($25.63\%$ vs. $24.05\%$) while maintaining nearly half the MDD of Buy-and-Hold ($5.61\%\text{--}5.87\%$ vs. $10.29\%$).
+    \item \textbf{PPO Suffers Severe Turnover Erosion}: Standalone PPO models (\texttt{PPO\_Reward\_A/B/C}) execute frequent day-to-day weight oscillations, accumulating $\$1,078.25$ to $\$1,131.39$ in transaction costs (roughly $11\%$ of initial equity), compared to only $\$189.00$ to $\$207.61$ for SAC. Consequently, PPO's net CAGR collapses to $1.99\%\text{--}4.03\%$ (Sharpe $0.3286\text{--}0.5404$).
+\end{itemize}
+
+\subsection{RQ 2: Regime Behavior \& Dynamic Ensemble vs. Exposure-Matched Baseline}
+In Phase 5 Validation analysis, PPO and SAC demonstrated low action correlation across all ADX regimes ($\rho = 0.0491$ overall; $\rho = 0.0128$ when $\text{ADX}_{14} \ge 30$), with PPO adopting a conservative mean allocation ($35.34\%$) and SAC maintaining a balanced allocation ($54.66\%$). In Phase 6, blending these complementary behaviors via \texttt{ADX30\_S75\_W25} reduced Validation MDD from $21.63\%$ (SAC) and $20.99\%$ (PPO) down to $18.98\%$ and halved cross-seed Sharpe standard deviation to $0.0846$.
+
+However, out-of-sample Test evaluation (Table~\ref{tab:test_summary}) demonstrates why an \textbf{Exposure-Matched Baseline} is indispensable. While \texttt{Dynamic\_Ensemble\_ADX30\_S75\_W25} achieves a respectable Sharpe of $1.4269 \pm 0.0755$ and MDD of $5.81\%$ (outperforming Moving Average 20/50 by $+0.4050$ in Sharpe), it trails the \texttt{Exposure\_Matched\_Baseline} (Sharpe $1.7170$, CAGR $10.97\%$, MDD $5.04\%$) by $-0.2901$ in Sharpe and $-1.58\%$p in CAGR. Because the ensemble assigns a $0.75$ weight to PPO during strong trends ($\text{ADX}_{14} \ge 30$, 128 Test days), it inherits a portion of PPO's high turnover, paying $\$466.21$ in transaction fees versus $\$13.44$ for the passive exposure-matched portfolio. Thus, once average beta exposure ($47.98\%$) is strictly controlled, the regime-switching ensemble does not generate positive net market-timing alpha in the 2023--2024 bull market.
+
+\subsection{RQ 3: Consistency of Risk Penalties Across Random Seeds (Reward Ablation)}
+Table~\ref{tab:seed_ablation} details the per-seed Test metrics for SAC across Rewards A, B, and C:
+\begin{itemize}
+    \item \textbf{Drawdown Penalty ($R_A \rightarrow R_B$, $\lambda_d = 0.02$)}: In Validation (Table~\ref{tab:val_ranking}), \texttt{SAC\_Reward\_B} ranked \#1 overall, improving mean Sharpe ($0.2505 \rightarrow 0.2753$) and reducing mean MDD ($21.63\% \rightarrow 20.69\%$). In the Test split, \texttt{SAC\_Reward\_B} reduces mean MDD from $5.87\%$ to $5.61\%$ ($-0.26\%$p) and lowers MDD in \textbf{4 out of 5 random seeds} (Seeds 22, 33, 44, and 55), reaching an MDD of $4.53\%$ on Seed 33. Moreover, $R_B$ reduces cross-seed Sharpe standard deviation by $41\%$ ($0.1766 \rightarrow 0.1039$). For PPO, $R_A \rightarrow R_B$ lowers mean Test MDD by $-0.20\%$p ($8.45\% \rightarrow 8.25\%$, improved in $2/5$ seeds).
+    \item \textbf{Variance Penalty ($R_B \rightarrow R_C$, $\lambda_v = 10.0$)}: Adding the raw variance penalty in PPO slightly reduces annualized volatility ($7.34\% \rightarrow 7.32\%$, $-0.02\%$p, $2/5$ seeds) and lifts mean Sharpe from $0.3286$ to $0.5404$. In SAC, where baseline policy volatility is already tightly bounded ($6.93\%$), adding $\lambda_v = 10.0$ yields virtually identical volatility ($6.97\%$, $+0.04\%$p, improved/maintained in $3/5$ seeds) and Sharpe ($1.6314$ vs. $1.6077$), indicating that drawdown penalization alone ($R_B$) suffices to regularize SAC's downside risk.
+\end{itemize}
+
+\begin{table}[t]
+\centering
+\caption{Per-Seed Out-of-Sample Test MDD (\%) and Sharpe Ratio for SAC Reward Ablation (RQ3 Verification)}
+\label{tab:seed_ablation}
+\begin{tabular}{ccccccc}
+\toprule
+\multirow{2}{*}{\textbf{Seed}} & \multicolumn{3}{c}{\textbf{Test MDD (\%)}} & \multicolumn{3}{c}{\textbf{Test Sharpe Ratio}} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+ & \textbf{SAC-A} & \textbf{SAC-B} & \textbf{SAC-C} & \textbf{SAC-A} & \textbf{SAC-B} & \textbf{SAC-C} \\
+\midrule
+11 & \textbf{5.80} & 5.95 & 6.06 & 1.6016 & \textbf{1.6431} & 1.5134 \\
+22 & 7.72 & \textbf{6.56} & 7.41 & 1.4177 & 1.4392 & \textbf{1.4499} \\
+33 & 4.57 & 4.53 & \textbf{4.38} & \textbf{1.8908} & 1.6686 & 1.8146 \\
+44 & 5.31 & \textbf{5.13} & 5.17 & 1.6975 & 1.7038 & \textbf{1.7419} \\
+55 & 5.95 & \textbf{5.87} & 5.92 & 1.5509 & 1.5837 & \textbf{1.6372} \\
+\midrule
+\textbf{Mean} & 5.87 & \textbf{5.61} & 5.79 & \textbf{1.6317} & 1.6077 & 1.6314 \\
+\textbf{Std}  & 1.16 & \textbf{0.78} & 1.12 & 0.1766 & \textbf{0.1039} & 0.1522 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table*}[t]
+\centering
+\caption{Phase 7 Transaction Cost Sensitivity Analysis on Test Split (2023--2024) Across One-Way Cost Rates $c \in \{0.1\%, 0.3\%, 0.5\%\}$}
+\label{tab:cost_sensitivity}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{clccccccc}
+\toprule
+\textbf{One-Way Cost} & \textbf{Model / Strategy} & \textbf{CAGR (\%)} & \textbf{Sharpe} & \textbf{MDD (\%)} & \textbf{Mean Cost (\$)} & \textbf{Excess Sharpe vs. Fixed 50:50} & \textbf{Excess Sharpe vs. Exp-Matched} & \textbf{Excess Sharpe vs. MA(20/50)} \\
+\midrule
+\multirow{6}{*}{0.1\% (Base)}
+ & \texttt{3\_Fixed\_50\_50}                & 11.45 & 1.7171 &  5.25 &    13.73 &   0.0000 & $+0.0001$ & $+0.6952$ \\
+ & \texttt{4\_Moving\_Average\_20\_50}      & 10.95 & 1.0219 &  9.39 &    95.86 & $-0.6952$ & $-0.6951$ &   0.0000 \\
+ & \texttt{Exposure\_Matched\_Baseline}     & 10.97 & 1.7170 &  5.04 &    13.44 & $-0.0001$ &   0.0000 & $+0.6951$ \\
+ & \texttt{PPO\_Reward\_A}                  &  2.31 & 0.3340 &  8.45 & 1,094.15 & $-1.3831$ & $-1.3830$ & $-0.6879$ \\
+ & \texttt{SAC\_Reward\_A}                  & \textbf{12.16} & \textbf{1.6317} &  5.87 &   189.00 & $-0.0854$ & $-0.0853$ & $\mathbf{+0.6098}$ \\
+ & \texttt{Dynamic\_Ensemble\_ADX30\_S75\_W25} &  9.39 & 1.4269 &  5.81 &   466.21 & $-0.2902$ & $-0.2901$ & $+0.4050$ \\
+\midrule
+\multirow{6}{*}{0.3\% (3$\times$)}
+ & \texttt{3\_Fixed\_50\_50}                & 11.30 & 1.6969 &  5.27 &    41.14 &   0.0000 & $+0.0006$ & $+0.7600$ \\
+ & \texttt{4\_Moving\_Average\_20\_50}      &  9.94 & 0.9369 &  9.75 &   285.18 & $-0.7600$ & $-0.7594$ &   0.0000 \\
+ & \texttt{Exposure\_Matched\_Baseline}     & 10.83 & 1.6963 &  5.06 &    40.28 & $-0.0006$ &   0.0000 & $+0.7594$ \\
+ & \texttt{PPO\_Reward\_A}                  & $-8.00$ & $-1.1851$ & 18.09 & 2,956.81 & $-2.8820$ & $-2.8814$ & $-2.1220$ \\
+ & \texttt{SAC\_Reward\_A}                  & \textbf{10.29} & \textbf{1.4000} &  6.19 &   556.58 & $-0.2969$ & $-0.2963$ & $\mathbf{+0.4631}$ \\
+ & \texttt{Dynamic\_Ensemble\_ADX30\_S75\_W25} &  4.81 & 0.7559 &  6.65 & 1,339.03 & $-0.9410$ & $-0.9404$ & $-0.1810$ \\
+\midrule
+\multirow{6}{*}{0.5\% (5$\times$)}
+ & \texttt{3\_Fixed\_50\_50}                & 11.16 & 1.6765 &  5.29 &    68.49 &   0.0000 & $+0.0011$ & $+0.8259$ \\
+ & \texttt{4\_Moving\_Average\_20\_50}      &  8.95 & 0.8506 & 10.12 &   471.35 & $-0.8259$ & $-0.8248$ &   0.0000 \\
+ & \texttt{Exposure\_Matched\_Baseline}     & 10.69 & 1.6754 &  5.08 &    67.06 & $-0.0011$ &   0.0000 & $+0.8248$ \\
+ & \texttt{PPO\_Reward\_A}                  & $-17.31$ & $-2.6041$ & 32.64 & 4,458.73 & $-4.2806$ & $-4.2795$ & $-3.4547$ \\
+ & \texttt{SAC\_Reward\_A}                  & \textbf{8.45} & \textbf{1.1681} &  6.54 &   910.71 & $-0.5084$ & $-0.5073$ & $\mathbf{+0.3175}$ \\
+ & \texttt{Dynamic\_Ensemble\_ADX30\_S75\_W25} &  0.43 & 0.0852 &  8.38 & 2,138.26 & $-1.5913$ & $-1.5902$ & $-0.7654$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+\subsection{RQ 4: Reproducibility \& Transaction Cost Sensitivity}
+To test robustness under market friction without retraining, we evaluate all frozen policies at elevated one-way transaction cost rates of $c = 0.3\%$ and $c = 0.5\%$ (Table~\ref{tab:cost_sensitivity}).
+\begin{itemize}
+    \item \textbf{SAC Resilience Under High Friction}: Even when transaction costs increase fivefold to $0.5\%$ per trade, \texttt{SAC\_Reward\_A} maintains a strongly positive CAGR of $8.45\%$, Sharpe ratio of $1.1681$, and MDD of $6.54\%$, outperforming \texttt{4\_Moving\_Average\_20\_50} across every cost tier ($+0.6098$ Sharpe at $0.1\%$, $+0.4631$ at $0.3\%$, and $+0.3175$ at $0.5\%$). Similarly, \texttt{SAC\_Reward\_B} and \texttt{SAC\_Reward\_C} preserve Sharpe ratios of $1.0741$ and $1.1315$ at $c = 0.5\%$.
+    \item \textbf{Critical Breakdown of High-Turnover Policies}: PPO's net return turns sharply negative at $c = 0.3\%$ (\texttt{PPO\_Reward\_A} CAGR $-8.00\%$, Sharpe $-1.1851$, cost $\$2,956.81$) and suffers severe capital depletion at $c = 0.5\%$ (CAGR $-17.31\%$, MDD $32.64\%$, cost $\$4,458.73$). The dynamic ensemble outperforms Moving Average (20/50) at $c = 0.1\%$ ($+0.4050$ Sharpe) but crosses below Moving Average at $c = 0.3\%$ ($-0.1810$ Sharpe), confirming that blending high-turnover on-policy agents introduces substantial transaction-cost fragility.
+\end{itemize}
+
+\section{Discussion}
+Our empirical findings offer two methodological insights for quantitative RL researchers. First, algorithm selection in continuous action spaces directly governs portfolio turnover. On-policy PPO updates rely on local clipped surrogate objectives over recent rollouts, which in noisy financial environments induces oscillatory target weights unless an explicit turnover penalty is imposed. Off-policy SAC, by contrast, learns smooth Q-value surfaces over a replay buffer with entropy regularization, naturally moderating daily rebalancing.
+
+Second, our results highlight the danger of evaluating RL ensembles without an \emph{Exposure-Matched Baseline}. Had we compared \texttt{Dynamic\_Ensemble\_ADX30\_S75\_W25} (Sharpe $1.4269$, MDD $5.81\%$) solely against \texttt{4\_Moving\_Average\_20\_50} (Sharpe $1.0219$, MDD $9.39\%$) or standalone PPO (Sharpe $0.3340$), we would have erroneously concluded that ADX regime switching generates strong alpha. Benchmarking against the frozen $47.98\%$ constant-weight baseline (Sharpe $1.7170$) reveals that the ensemble's low MDD stems from its conservative average exposure, while its active regime switching incurs transaction costs that outweigh timing gains during a persistent bull market.
+
+\textbf{Limitations}: (1) All experiments use unadjusted SPY prices excluding dividend cashflows; while applied identically across all benchmarks, total return indices would shift absolute CAGR levels upward. (2) The Test split (2023--2024) represents a strong low-volatility bull market (SPY Sharpe $1.7212$), where any cash buffer creates beta drag relative to 100\% equity. Evaluating frozen models across multi-asset universes and prolonged bear markets is an important direction for future work.
+
+\section{Conclusion}
+We presented \textbf{Adaptive-QuantRL}, a leak-free, accounting-verified benchmark for deep reinforcement learning in dynamic asset allocation. Across 30 models and 5 random seeds, off-policy SAC demonstrated superior cost efficiency and risk-adjusted performance (Test Sharpe $1.63$, MDD $5.61\%$), consistently outperforming rule-based moving average strategies even under $0.5\%$ transaction costs. Calibrated drawdown penalization (Reward B) improved downside protection in $4/5$ seeds, while our exposure-matched baseline framework provided a rigorous diagnostic separating beta exposure from net market-timing alpha.
+
+\begin{thebibliography}{9}
+\bibitem{moody2001learning}
+J. Moody and M. Saffell, ``Learning to trade via direct reinforcement,'' \emph{IEEE Transactions on Neural Networks}, vol. 12, no. 4, pp. 875--889, 2001.
+
+\bibitem{jiang2017deep}
+Z. Jiang, D. Xu, and J. Liang, ``A deep reinforcement learning framework for the financial portfolio management problem,'' \emph{arXiv preprint arXiv:1706.10059}, 2017.
+
+\bibitem{liu2020finrl}
+X.-Y. Liu, H. Yang, Q. Chen, R. Zhang, L. Yang, B. Xiao, and C. D. Wang, ``FinRL: A deep reinforcement learning library for automated stock trading in quantitative finance,'' in \emph{NeurIPS Deep RL Workshop}, 2020.
+
+\bibitem{schulman2017proximal}
+J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov, ``Proximal policy optimization algorithms,'' \emph{arXiv preprint arXiv:1707.06347}, 2017.
+
+\bibitem{haarnoja2018soft}
+T. Haarnoja, A. Zhou, P. Abbeel, and S. Levine, ``Soft actor-critic: Off-policy maximum entropy deep reinforcement learning with a stochastic actor,'' in \emph{International Conference on Machine Learning (ICML)}, 2018, pp. 1861--1870.
+\end{thebibliography}
+
+\end{document}

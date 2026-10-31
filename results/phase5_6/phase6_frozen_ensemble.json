@@ -1,0 +1,38 @@
+{
+  "selection_criteria": [
+    "1_mean_sharpe_desc",
+    "2_mean_mdd_asc",
+    "3_std_sharpe_asc"
+  ],
+  "num_rules_evaluated": 27,
+  "reward_type_used": "A",
+  "seeds": [
+    11,
+    22,
+    33,
+    44,
+    55
+  ],
+  "frozen_best_rule": {
+    "rule_id": "ADX30_S75_W25",
+    "adx_threshold": 30.0,
+    "w_strong_ppo": 0.75,
+    "w_strong_sac": 0.25,
+    "w_weak_ppo": 0.25,
+    "w_weak_sac": 0.75,
+    "val_mean_sharpe": 0.2267,
+    "val_mean_mdd": 18.98,
+    "val_std_sharpe": 0.0846
+  },
+  "exposure_matched_baseline": {
+    "description": "Frozen Validation average stock weight per seed from the selected ensemble rule",
+    "seed_weights": {
+      "11": 0.4826,
+      "22": 0.5309,
+      "33": 0.446,
+      "44": 0.4517,
+      "55": 0.4876
+    },
+    "mean_weight": 0.47976
+  }
+}
